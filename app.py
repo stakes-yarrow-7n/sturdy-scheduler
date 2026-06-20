@@ -3,7 +3,7 @@ import pandas as pd
 import random
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Cardiology Holiday Scheduler", layout="wide")
+st.set_page_config(page_title="Cardiology Holiday Scheduler", layout="wide", initial_sidebar_state="expanded")
 
 # --- CONSTANTS ---
 PROVIDERS = [
@@ -15,10 +15,32 @@ PROVIDERS = [
     "Petro Gjini, MD"
 ]
 HOLIDAYS = ["Memorial Day", "4th of July", "Labor Day", "Thanksgiving", "Christmas", "New Year"]
+MAJOR_HOLIDAYS = ["Thanksgiving", "Christmas", "New Year"]
 
-# Initialize session state for the 6-year results
 if 'master_schedule' not in st.session_state:
     st.session_state.master_schedule = None
+
+# --- SIDEBAR SETTINGS ---
+with st.sidebar:
+    st.header("⚙️ Group Settings")
+    st.markdown("Adjust system rules here before generating the schedule. You do not need to edit code to change these.")
+    
+    st.markdown("### Premium Holiday Weights")
+    st.markdown("Thanksgiving, Christmas, and New Year's are universally valued. Use the sliders below to determine how much *more* each specific holiday contributes to a provider's fatigue score.")
+    
+    weight_thanksgiving = st.slider("🦃 Thanksgiving Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
+    weight_christmas = st.slider("🎄 Christmas Multiplier", min_value=1.0, max_value=3.0, value=2.0, step=0.1)
+    weight_new_year = st.slider("🎆 New Year Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
+    
+    # Store these in a dictionary for easy lookup later
+    premium_weights = {
+        "Thanksgiving": weight_thanksgiving,
+        "Christmas": weight_christmas,
+        "New Year": weight_new_year
+    }
+    
+    st.divider()
+    st.caption("Settings adjustments apply immediately upon generating a new schedule.")
 
 # --- UI HEADER ---
 st.title("🏥 Cardiology Group - 6-Year Holiday Coverage")
@@ -26,10 +48,10 @@ st.title("🏥 Cardiology Group - 6-Year Holiday Coverage")
 with st.expander("📖 System Rules & Fatigue Scoring"):
     st.write("""
     * **Preferences:** Rank the holidays from **1 to 6**. (6 = Most Preferred to Cover, 1 = Least Preferred).
-    * **Fatigue Points:** If you are assigned a holiday, you earn points based on your dislike for it. Working a '1' earns you 6 points. Working a '6' earns you 1 point. 
-    * **Multiplier:** Your points compound over the 6 years. The higher your fatigue score, the stronger your mathematical priority to get the holidays you actually want in upcoming years.
-    * **Year 1 Rules:** Only Thanksgiving, Christmas, and New Year's are scheduled.
-    * **Years 2-6 Rules:** All 6 holidays are scheduled. No double-booking in a single year, and heavy protection against working the same holiday two years in a row.
+    * **Standard Fatigue Points:** Working a '1' earns you 6 points. Working a '6' earns you 1 point. 
+    * **The Major Holiday Premium:** Working Thanksgiving, Christmas, or New Year's applies a custom multiplier (set in the sidebar) to your points to reward the extra sacrifice.
+    * **Priority Odds:** Your points compound over the 6 years. The higher your fatigue score, the stronger your mathematical priority to get the holidays you actually want in upcoming years.
+    * **Rules:** No double-booking in a single year, and heavy protection against working the same holiday two years in a row.
     """)
 
 st.divider()
@@ -38,7 +60,6 @@ st.divider()
 st.markdown("### Step 1: Input Group Preferences")
 st.write("Rank 1 to 6 (6 = Most Preferred, 1 = Least Preferred)")
 
-# Default preferences set to 3 for a neutral baseline
 default_data = {hol: [3]*6 for hol in HOLIDAYS}
 df_prefs = pd.DataFrame(default_data, index=PROVIDERS)
 
@@ -46,18 +67,15 @@ edited_df = st.data_editor(df_prefs, use_container_width=True)
 
 if st.button("🎲 Generate Full 6-Year Schedule", type="primary"):
     
-    # Tracking variables for the 6-year loop
-    cum_points = {p: 0 for p in PROVIDERS}
+    cum_points = {p: 0.0 for p in PROVIDERS}
     last_year_holiday = {p: "None" for p in PROVIDERS}
     results = []
 
-    # Run the 6-year simulation
     for year in range(1, 7):
-        holidays_this_year = ["Thanksgiving", "Christmas", "New Year"] if year == 1 else HOLIDAYS
+        holidays_this_year = MAJOR_HOLIDAYS if year == 1 else HOLIDAYS
         available_providers = PROVIDERS.copy()
         year_assignments = {hol: "Not Assigned" for hol in HOLIDAYS}
         
-        # Assign each holiday
         for hol in holidays_this_year:
             best_score = -1
             best_provider = None
@@ -66,11 +84,10 @@ if st.button("🎲 Generate Full 6-Year Schedule", type="primary"):
                 try:
                     pref = float(edited_df.loc[p, hol])
                 except ValueError:
-                    pref = 3.0 # Fallback
+                    pref = 3.0
                 
-                # Math logic
                 rand_val = random.random()
-                mult = 1.0 + (cum_points[p] * 0.15) # Multiplier increases by 0.15 per fatigue point
+                mult = 1.0 + (cum_points[p] * 0.15)
                 fatigue_penalty = 0.01 if last_year_holiday[p] == hol else 1.0
                 
                 score = rand_val * pref * mult * fatigue_penalty
@@ -82,7 +99,6 @@ if st.button("🎲 Generate Full 6-Year Schedule", type="primary"):
             year_assignments[hol] = best_provider
             available_providers.remove(best_provider)
             
-        # Log the results and update compounding scores for the next year
         for p in PROVIDERS:
             assigned_hol = "None"
             for h, prov in year_assignments.items():
@@ -94,23 +110,33 @@ if st.button("🎲 Generate Full 6-Year Schedule", type="primary"):
             
             if assigned_hol != "None":
                 pref_val = int(edited_df.loc[p, assigned_hol])
-                pts_earned = 7 - pref_val # 1->6pts, 6->1pt
+                base_pts = 7 - pref_val 
+                
+                # Check if the holiday is one of the premium ones and apply its specific multiplier
+                if assigned_hol in premium_weights:
+                    multiplier_used = premium_weights[assigned_hol]
+                    pts_earned = base_pts * multiplier_used
+                    premium_text = f" (including the {multiplier_used}x {assigned_hol} bonus)" if multiplier_used > 1.0 else ""
+                else:
+                    pts_earned = float(base_pts)
+                    premium_text = ""
+                
                 cum_points[p] += pts_earned
                 last_year_holiday[p] = assigned_hol
                 
                 if year == 1:
-                    exp = f"Year 1 baseline. You started with 0 fatigue points. You were assigned {assigned_hol} (which you ranked a {pref_val}), adding {pts_earned} points to your fatigue score for next year."
+                    exp = f"Year 1 baseline (0 points). Assigned {assigned_hol} (ranked a {pref_val}), adding {pts_earned}{premium_text} points to your fatigue score."
                 else:
-                    exp = f"Entering this year, your fatigue score was {pts_before}, giving you a priority multiplier of {mult_before:.2f}x. You were assigned {assigned_hol} (ranked {pref_val}), earning {pts_earned} new points."
+                    exp = f"Started year with {pts_before} pts (Multiplier: {mult_before:.2f}x). Assigned {assigned_hol} (ranked {pref_val}), earning {pts_earned} new points{premium_text}."
             else:
                 pref_val = None
                 pts_earned = 0
                 last_year_holiday[p] = "None"
                 
                 if year == 1:
-                    exp = "Year 1 baseline. You were one of the providers not assigned a holiday this year. Your fatigue score remains 0."
+                    exp = "Year 1 baseline. You were not assigned a holiday this year. Fatigue score remains 0."
                 else:
-                    exp = f"Entering this year, your fatigue score was {pts_before}, giving you a priority multiplier of {mult_before:.2f}x. You were not assigned a holiday this year."
+                    exp = f"Started year with {pts_before} pts (Multiplier: {mult_before:.2f}x). Not assigned a holiday this year."
             
             results.append({
                 "Year": f"Year {year}",
@@ -129,7 +155,6 @@ if st.session_state.master_schedule is not None:
     
     with tab1:
         st.write("#### Full 6-Year Master Roster")
-        # Pivot the table to show Years as rows and Holidays as columns for the group
         group_df = st.session_state.master_schedule.copy()
         st.dataframe(group_df[["Year", "Provider", "Assigned Holiday"]], use_container_width=True, hide_index=True)
         
@@ -143,7 +168,6 @@ if st.session_state.master_schedule is not None:
             with st.container():
                 st.markdown(f"##### {row['Year']}")
                 
-                # Visual badge for the assignment
                 if row['Assigned Holiday'] == "None":
                     st.info(f"**Assignment:** OFF")
                 else:
