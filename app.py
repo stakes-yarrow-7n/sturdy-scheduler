@@ -23,11 +23,9 @@ if 'master_schedule' not in st.session_state:
 # --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("⚙️ Group Settings")
-    st.markdown("Adjust system rules here before generating the schedule. You do not need to edit code to change these.")
+    st.markdown("Adjust system rules here before generating the schedule.")
     
     st.markdown("### Premium Holiday Weights")
-    st.markdown("Thanksgiving, Christmas, and New Year's are universally valued. Use the sliders below to determine how much *more* each specific holiday contributes to a provider's fatigue score.")
-    
     weight_thanksgiving = st.slider("🦃 Thanksgiving Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
     weight_christmas = st.slider("🎄 Christmas Multiplier", min_value=1.0, max_value=3.0, value=2.0, step=0.1)
     weight_new_year = st.slider("🎆 New Year Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
@@ -37,9 +35,7 @@ with st.sidebar:
         "Christmas": weight_christmas,
         "New Year": weight_new_year
     }
-    
     st.divider()
-    st.caption("Settings adjustments apply immediately upon generating a new schedule.")
 
 # --- UI HEADER ---
 st.title("🏥 Cardiology Group - 6-Year Holiday Coverage")
@@ -48,8 +44,8 @@ with st.expander("📖 System Rules & Fatigue Scoring"):
     st.write("""
     * **Preferences:** Rank the holidays from **1 to 6**. (6 = Most Preferred to Cover, 1 = Least Preferred).
     * **Standard Fatigue Points:** Working a '1' earns you 6 points. Working a '6' earns you 1 point. 
-    * **The Major Holiday Premium:** Working Thanksgiving, Christmas, or New Year's applies a custom multiplier (set in the sidebar) to your points to reward the extra sacrifice.
-    * **Priority Odds:** Your points compound over the 6 years. The higher your fatigue score, the stronger your mathematical priority to get the holidays you actually want in upcoming years.
+    * **The Major Holiday Premium:** Working Thanksgiving, Christmas, or New Year's applies a custom multiplier to reward the extra sacrifice.
+    * **Priority Odds:** Your points compound over the 6 years. The higher your fatigue score, the stronger your mathematical priority in upcoming years.
     * **Rules:** No double-booking in a single year, and heavy protection against working the same holiday two years in a row.
     """)
 
@@ -58,11 +54,10 @@ st.divider()
 # --- INPUT SECTION ---
 st.markdown("### Step 1: Input Group Preferences")
 
-# Google Sheets Link
 my_sheet_url = "https://docs.google.com/spreadsheets/d/1dewvDOk7_dzEH06DyeXKGr6p4kiBO_6_49zvpnL9xfM/export?format=csv"
 sheet_url = st.text_input("🔗 Google Sheets CSV Link", value=my_sheet_url) 
 
-# ALWAYS start by creating the complete default table (all 6 doctors, all 3s)
+# Start by creating the complete default table (all 6 doctors, all 3s)
 default_data = {hol: [3]*len(PROVIDERS) for hol in HOLIDAYS}
 df_prefs = pd.DataFrame(default_data, index=PROVIDERS)
 
@@ -71,28 +66,54 @@ if sheet_url:
         # Read the live Google Sheet
         survey_data = pd.read_csv(sheet_url)
         
-        # Loop through the survey and overwrite the 3s with real data
+        # Clean the Google Sheet column names (make lowercase, remove spaces)
+        survey_data.columns = [str(c).strip().lower() for c in survey_data.columns]
+        
         count = 0
         for index, row in survey_data.iterrows():
-            # Get the exact name they selected in the form
-            doc_name = str(row.get("doctor name", "")).strip()
+            # Find the name column (even if it's slightly misspelled)
+            raw_name = ""
+            for col in survey_data.columns:
+                if "doctor" in col or "name" in col:
+                    raw_name = str(row[col]).strip().lower()
+                    break
+                    
+            # FUZZY MATCH: Check if the doctor's real base name is inside the form name
+            matched_provider = None
+            for p in PROVIDERS:
+                base_name = p.split(",")[0].strip().lower() # Turns "Ross Pollack, MD" into "ross pollack"
+                if base_name in raw_name:
+                    matched_provider = p
+                    break
             
-            # If that name is in our master list, update their row
-            if doc_name in df_prefs.index:
+            # If we found a match, fill in their holidays
+            if matched_provider:
                 for hol in HOLIDAYS:
-                    if hol in row:
-                        df_prefs.loc[doc_name, hol] = int(row[hol])
+                    hol_lower = hol.lower()
+                    # Find the matching column in Google Sheets
+                    for col in survey_data.columns:
+                        if hol_lower in col or (hol_lower == "july 4th" and "4th" in col):
+                            try:
+                                df_prefs.loc[matched_provider, hol] = int(float(row[col]))
+                            except ValueError:
+                                pass # Skip if they left it blank or typed a word
+                            break
                 count += 1
         
         if count > 0:
             st.success(f"Successfully loaded responses for {count} provider(s)!")
         else:
-            st.info("Connected to Google Sheets. Waiting for form submissions...")
+            st.info("Connected to Google Sheets. Waiting for form submissions (or names didn't match).")
+            
+        # Developer tool to see exactly what Google is sending
+        with st.expander("🛠️ Developer View (Raw Google Data)"):
+            st.write("If names aren't matching, check what Google is actually sending below:")
+            st.dataframe(survey_data)
             
     except Exception as e:
         st.error(f"Could not connect to sheet. Defaulting to 3s. (Error: {e})")
 
-# Show the data table (it will auto-fill if the link is used!)
+# Show the data table
 edited_df = st.data_editor(df_prefs, use_container_width=True)
 
 
