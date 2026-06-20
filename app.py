@@ -209,4 +209,7 @@ if st.session_state.master_schedule is not None:
                 if row['Assigned Holiday'] == "None":
                     st.info(f"**Assignment:** OFF")
                 else:
-                    st.error(f"**Assignment:** {row['Ass
+                    st.error(f"**Assignment:** {row['Assigned Holiday']}")
+                    
+                st.write(f"> *{row['Explanation']}*")
+                st.divider()
