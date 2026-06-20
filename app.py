@@ -14,7 +14,6 @@ PROVIDERS = [
     "George Waters, MD", 
     "Petro Gjini, MD"
 ]
-# Updated to exactly match your Google Form
 HOLIDAYS = ["Memorial Day", "July 4th", "Labor Day", "Thanksgiving", "Christmas", "New Year"]
 MAJOR_HOLIDAYS = ["Thanksgiving", "Christmas", "New Year"]
 
@@ -63,35 +62,37 @@ st.markdown("### Step 1: Input Group Preferences")
 my_sheet_url = "https://docs.google.com/spreadsheets/d/1dewvDOk7_dzEH06DyeXKGr6p4kiBO_6_49zvpnL9xfM/export?format=csv"
 sheet_url = st.text_input("🔗 Google Sheets CSV Link", value=my_sheet_url) 
 
+# ALWAYS start by creating the complete default table (all 6 doctors, all 3s)
+default_data = {hol: [3]*len(PROVIDERS) for hol in HOLIDAYS}
+df_prefs = pd.DataFrame(default_data, index=PROVIDERS)
+
 if sheet_url:
     try:
         # Read the live Google Sheet
         survey_data = pd.read_csv(sheet_url)
-        st.success("Successfully connected to Google Form responses!")
         
-        # Build the table from the survey data using the exact exact form names
-        imported_data = {
-            "Memorial Day": survey_data["Memorial Day"].tolist(),
-            "July 4th": survey_data["July 4th"].tolist(), 
-            "Labor Day": survey_data["Labor Day"].tolist(),
-            "Thanksgiving": survey_data["Thanksgiving"].tolist(),
-            "Christmas": survey_data["Christmas"].tolist(),
-            "New Year": survey_data["New Year"].tolist()
-        }
+        # Loop through the survey and overwrite the 3s with real data
+        count = 0
+        for index, row in survey_data.iterrows():
+            # Get the exact name they selected in the form
+            doc_name = str(row.get("doctor name", "")).strip()
+            
+            # If that name is in our master list, update their row
+            if doc_name in df_prefs.index:
+                for hol in HOLIDAYS:
+                    if hol in row:
+                        df_prefs.loc[doc_name, hol] = int(row[hol])
+                count += 1
         
-        provider_names = survey_data["Doctor Name"].tolist()
-        df_prefs = pd.DataFrame(imported_data, index=provider_names)
-        
+        if count > 0:
+            st.success(f"Successfully loaded responses for {count} provider(s)!")
+        else:
+            st.info("Connected to Google Sheets. Waiting for form submissions...")
+            
     except Exception as e:
-        st.error(f"Waiting for form responses... (Error: {e})")
-        default_data = {hol: [3]*6 for hol in HOLIDAYS}
-        df_prefs = pd.DataFrame(default_data, index=PROVIDERS)
-else:
-    st.write("Rank 1 to 6 (6 = Most Preferred, 1 = Least Preferred)")
-    default_data = {hol: [3]*6 for hol in HOLIDAYS}
-    df_prefs = pd.DataFrame(default_data, index=PROVIDERS)
+        st.error(f"Could not connect to sheet. Defaulting to 3s. (Error: {e})")
 
-# Show the data table
+# Show the data table (it will auto-fill if the link is used!)
 edited_df = st.data_editor(df_prefs, use_container_width=True)
 
 
@@ -208,7 +209,4 @@ if st.session_state.master_schedule is not None:
                 if row['Assigned Holiday'] == "None":
                     st.info(f"**Assignment:** OFF")
                 else:
-                    st.error(f"**Assignment:** {row['Assigned Holiday']}")
-                    
-                st.write(f"> *{row['Explanation']}*")
-                st.divider()
+                    st.error(f"**Assignment:** {row['Ass
